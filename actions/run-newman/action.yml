@@ -1,0 +1,88 @@
+name: Newman automation action
+description: Newman automation action
+inputs:
+  name:
+    description: "Test name (report name)"
+    required: true
+  collection:
+    description: "Collection json path"
+    required: true
+  environment:
+    description: "Environment json path"
+    required: true
+  iteration-data:
+    description: "Data json path"
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install Node
+      uses: actions/setup-node@v3
+      with:
+        node-version: 16
+    - name: Install Test Dependencies
+      shell: bash
+      run: |
+        npm install -g newman
+        npm install -g newman-reporter-htmlextra
+        npm install -g newman-reporter-junitfull
+    - name: Set Env Variables
+      shell: bash
+      run: |
+        set -ex
+        echo "TEST_NAME=${{ inputs.name }}" >> ${GITHUB_ENV}
+        echo "COLLECTION_PATH=${{ inputs.collection }}" >> ${GITHUB_ENV}
+        echo "ENV_PATH=${{ inputs.environment }}" >> ${GITHUB_ENV}
+        echo "DATA_PATH=${{ inputs.iteration-data }}" >> ${GITHUB_ENV}
+        echo "GLOBAL_ENV_FILE=reports/environment.json" >> ${GITHUB_ENV}
+        echo "GLOBAL_ENV_EXP_FILE=reports/global_environment.json" >> ${GITHUB_ENV}
+        mkdir reports
+        echo {} > reports/environment.json
+        echo $TEST_NAME
+        echo $COLLECTION_PATH
+        echo $ENV_PATH
+        echo $DATA_PATH
+    - name: Publish reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: ApiTest-reports
+        path: reports
+    - name: Download reports
+      uses: actions/download-artifact@v3
+      with:
+        name: ApiTest-reports
+        path: reports
+    - name: Resolve Global Environement
+      shell: bash
+      run: |
+        if test -f "$GLOBAL_ENV_EXP_FILE"; then
+            echo "$(cat reports/global_environment.json)" > ${{ env.GLOBAL_ENV_FILE }}
+        fi
+        echo "$(cat reports/environment.json)"
+    - name: Run ${{env.TEST_NAME}} Collection
+      shell: bash
+      id: base_plan_api_automation
+      run: |
+        newman run ${{env.COLLECTION_PATH}} -e ${{env.ENV_PATH}} -d ${{env.DATA_PATH}} -g ${{ env.GLOBAL_ENV_FILE }} \
+        --export-globals reports/global_environment.json \
+        --bail --reporters cli,htmlextra,junit,json \
+        --reporter-htmlextra-export reports/${{env.TEST_NAME}}.html \
+        --reporter-htmlextra-title "${{env.TEST_NAME}} Dashboard" \
+        --reporter-htmlextra-browserTitle "${{env.TEST_NAME}} Automation" \
+        --reporter-htmlextra-titleSize "6" \
+        --reporter-junit-export reports/${{env.TEST_NAME}}.xml \
+        --reporter-json-export reports/${{env.TEST_NAME}}.json \
+    - name: Publish reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: ApiTest-reports
+        path: reports
+    - name: Publish Test Results
+      uses: EnricoMi/publish-unit-test-result-action@v1
+      if: always()
+      with:
+        check_name: "${{ inputs.name }} Test Results"
+        files: |
+          reports/**/*.xml
